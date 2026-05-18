@@ -428,7 +428,7 @@ async def human_move(page, x: int, y: int, duration_ms: int | None = None):
     if duration_ms is None:
         duration_ms = random.randint(200, 500)
     sx, sy = _last_mouse_pos
-    steps = min(3, max(2, duration_ms // 75))
+    steps = min(5, max(2, duration_ms // 75))
     per_step = (duration_ms / steps) / 1000  # seconds
     handler_total = 0.0
     for i in range(1, steps + 1):
@@ -457,7 +457,7 @@ async def simulate_human(page):
         for _ in range(n_actions):
             action = random.choices(
                 ["move", "scroll_down", "scroll_up", "pause"],
-                weights=[5, 35, 15, 45],
+                weights=[15, 30, 15, 40],
             )[0]
             t0 = time.time()
             if action == "move":
