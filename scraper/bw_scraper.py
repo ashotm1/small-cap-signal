@@ -264,19 +264,39 @@ def save_worker_ranges(ranges: list):
     _atomic_replace(tmp, RANGES_CSV)
 
 
-def _in_other_worker_territory(state, wid: int, page_n: int) -> bool:
-    """True if page_n is within any OTHER worker's [start, end] range."""
-    for other_wid in range(len(state.worker_start)):
-        if other_wid == wid:
+def _find_infiltrated(state, ridx: int, page_n: int):
+    """Return index of a range (other than ridx) whose [start, end] contains
+    page_n, else None. Used to detect when a worker has scraped forward into
+    territory already covered by another range."""
+    for idx in range(len(state.worker_start)):
+        if idx == ridx:
             continue
-        if state.worker_start[other_wid] <= page_n <= state.worker_end[other_wid]:
-            return True
-    return False
+        if state.worker_start[idx] <= page_n <= state.worker_end[idx]:
+            return idx
+    return None
 
 
-def _relocation_start(state) -> int:
-    """Fresh-chunk start = max known page across all workers + CHUNK_SIZE."""
-    return max(max(state.worker_start), max(state.worker_end)) + CHUNK_SIZE
+def _claim_free_range_locked(state) -> int | None:
+    """Claim the lowest-start range whose status is 'free', mark it 'live', and
+    return its index. None if no free range. Caller MUST hold state.range_lock."""
+    free = [i for i in range(len(state.range_status)) if state.range_status[i] == "free"]
+    if not free:
+        return None
+    idx = min(free, key=lambda i: state.worker_start[i])
+    state.range_status[idx] = "live"
+    return idx
+
+
+def _new_chunk_locked(state) -> int:
+    """Append a fresh 'live' chunk at (max known page + CHUNK_SIZE), persist,
+    return its index. Caller MUST hold state.range_lock."""
+    start = max(max(state.worker_start), max(state.worker_end)) + CHUNK_SIZE
+    state.worker_start.append(start)
+    state.worker_end.append(start)
+    state.range_status.append("live")
+    idx = len(state.worker_start) - 1
+    save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
+    return idx
 
 
 def compute_worker_ranges(existing: list, parallelism: int, first_run_start: int) -> list:
@@ -488,8 +508,8 @@ async def simulate_human(page):
     except Exception:
         pass
     if not timings:
-        return "sim=noop"
-    return "sim=" + " ".join(f"{n}:{t:.2f}" for n, t in timings)
+        return "sim=(noop)"
+    return "sim=(" + " ".join(f"{n}:{t:.2f}" for n, t in timings) + ")"
 
 
 def _is_target_closed(e: Exception) -> bool:
@@ -540,9 +560,11 @@ def _new_session_max():
 
 class State:
     def __init__(self):
-        # Per-worker ranges, ordered by wid. Updated as workers scrape.
+        # Range pool (indexed by range id, NOT worker id). Grows as new chunks
+        # are appended. Workers claim/release indices from this pool.
         self.worker_start: list = []
         self.worker_end:   list = []
+        self.range_status: list = []   # per-range: "free" | "live" | "burnt"
         self.pages_scraped: int = 0
         self.total_new: int = 0
         self.nav_fail_streak: int = 0
@@ -557,7 +579,8 @@ class State:
         self.pause_event = asyncio.Event()
         self.pause_event.set()           # not paused at startup
         self.csv_lock = asyncio.Lock()   # guards existing_rows + write_all/append_new
-        self.state_lock = asyncio.Lock() # guards counters + runs.csv + ranges save
+        self.state_lock = asyncio.Lock() # guards counters + runs.csv
+        self.range_lock = asyncio.Lock() # guards worker_start/end + claimed/burnt + ranges save
 
 
 _MOUSEMOVE_TIMER_SCRIPT = """
@@ -602,8 +625,11 @@ async def worker(wid: int, ctx, state: State, args):
     page = await ctx.new_page()
     retry_waits = (0, 30, 60, 300)
 
-    start = state.worker_start[wid]
-    end   = state.worker_end[wid]
+    ridx = wid
+    async with state.range_lock:
+        state.range_status[ridx] = "live"
+    start = state.worker_start[ridx]
+    end   = state.worker_end[ridx]
     is_fresh = (end <= start)
 
     page_n = start
@@ -611,12 +637,11 @@ async def worker(wid: int, ctx, state: State, args):
     consecutive_dups = 0
     in_phase_2 = is_fresh   # fresh workers behave like phase 2 (no shift detection)
     max_scraped = start - 1
-    shift_count_logged: int | None = None
 
     if is_fresh:
-        print(f"  [w{wid}] FRESH start={start}", flush=True)
+        print(f"  [w{wid}] r{ridx} FRESH start={start}", flush=True)
     else:
-        print(f"  [w{wid}] RESUME range=[{start}, {end}]", flush=True)
+        print(f"  [w{wid}] r{ridx} RESUME range=[{start}, {end}]", flush=True)
 
     try:
         while not state.stop.is_set():
@@ -715,15 +740,16 @@ async def worker(wid: int, ctx, state: State, args):
             if not in_phase_2:
                 pages_in_phase1 += 1
 
+            async with state.range_lock:
+                # Persist the range's end whenever it advances.
+                if max_scraped > state.worker_end[ridx]:
+                    state.worker_end[ridx] = max_scraped
+                    save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
+                running_max = max(state.worker_end)
             async with state.state_lock:
                 state.total_new += new_count
                 state.pages_scraped += 1
                 state.nav_fail_streak = 0
-                # Persist the worker's end whenever it advances.
-                if max_scraped > state.worker_end[wid]:
-                    state.worker_end[wid] = max_scraped
-                    save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
-                running_max = max(state.worker_end)
                 state.current_run["to_page"]     = str(running_max)
                 state.current_run["total_pages"] = str(state.pages_scraped)
                 state.current_run["duration"]    = fmt_duration(time.time() - state.run_start)
@@ -763,14 +789,14 @@ async def worker(wid: int, ctx, state: State, args):
                 # run can skip directly to the new frontier for shift detection.
                 if consecutive_dups >= SHIFT_DUP_THRESHOLD:
                     shift_count = pages_in_phase1 - SHIFT_DUP_THRESHOLD
-                    shift_count_logged = shift_count
                     new_page_n = end + shift_count
-                    new_start = start + shift_count   # advance start by actual shift only, NOT by prior phase-2 distance
-                    print(f"  [w{wid}] phase 1 done: shift_count={shift_count}, jumping to page {new_page_n}; start advanced {state.worker_start[wid]}->{new_start}", flush=True)
+                    # Do NOT advance worker_start. The 50 new URLs we just
+                    # picked up in phase 1 are at original positions below
+                    # the original start; if we advance start, next run's
+                    # phase 1 lands in already-scraped territory and reads
+                    # shift_count=0, missing real shifts. Keep start static.
+                    print(f"  [w{wid}] phase 1 done: shift_count={shift_count}, jumping to page {new_page_n}; start stays at {start}", flush=True)
                     page_n = new_page_n
-                    async with state.state_lock:
-                        state.worker_start[wid] = new_start
-                        save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
                     in_phase_2 = True
                     consecutive_dups = 0
                     # skip page_n += 1 — we just set it explicitly
@@ -780,32 +806,50 @@ async def worker(wid: int, ctx, state: State, args):
                         await asyncio.sleep(target - elapsed)
                     continue
             else:
-                # Phase 2 / fresh: relocate if we crossed into another worker's
-                # territory and confirmed via SHIFT_DUP_THRESHOLD dups; otherwise
-                # standard dup-stop ends this worker.
-                if (consecutive_dups >= SHIFT_DUP_THRESHOLD
-                        and _in_other_worker_territory(state, wid, page_n)):
-                    new_start = _relocation_start(state)
-                    print(f"  [w{wid}] crossed into another worker's territory at page {page_n} "
-                          f"(cdup={consecutive_dups}) — relocating to fresh chunk at {new_start}", flush=True)
-                    async with state.state_lock:
-                        state.worker_start[wid] = new_start
-                        state.worker_end[wid]   = new_start
+                # Phase 2 / fresh. Two ways the current range ends:
+                #   (a) we crossed into another range (infiltration), or
+                #   (b) we hit dup-stop in our own territory.
+                # Both burn the current range and switch to a new one; only the
+                # next-range choice differs.
+                next_ridx = None
+                if consecutive_dups >= SHIFT_DUP_THRESHOLD:
+                    async with state.range_lock:
+                        inf = _find_infiltrated(state, ridx, page_n)
+                        if inf is not None:
+                            state.worker_start[inf] = page_n               # 1. shrink infiltrated start to dup page
+                            state.worker_end[ridx] = max(state.worker_end[ridx], page_n)
+                            state.range_status[ridx] = "burnt"             # 2. burn own range
+                            next_ridx = _claim_free_range_locked(state)    #    free range, else fresh chunk
+                            if next_ridx is None:
+                                next_ridx = _new_chunk_locked(state)
+                            save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
+                            print(f"  [w{wid}] r{ridx} crossed into r{inf} at page {page_n} "
+                                  f"(cdup={consecutive_dups}) — shrank r{inf}.start={page_n}, switching to r{next_ridx}",
+                                  flush=True)
+                if next_ridx is None and consecutive_dups >= args.dup_stop:
+                    async with state.range_lock:
+                        state.range_status[ridx] = "burnt"
+                        next_ridx = _claim_free_range_locked(state)        # own dup-stop: free range, else exit
                         save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
-                    page_n = new_start
-                    end = new_start
-                    is_fresh = True
-                    in_phase_2 = True
+                    if next_ridx is None:
+                        print(f"  [w{wid}] r{ridx} dup-stop ({args.dup_stop} dups), no free range — exiting", flush=True)
+                        break
+                    print(f"  [w{wid}] r{ridx} dup-stop ({args.dup_stop} dups) — switching to r{next_ridx}", flush=True)
+                if next_ridx is not None:
+                    ridx = next_ridx
+                    start = state.worker_start[ridx]
+                    end   = state.worker_end[ridx]
+                    is_fresh = (end <= start)
+                    in_phase_2 = is_fresh
+                    page_n = start
+                    pages_in_phase1 = 0
                     consecutive_dups = 0
-                    max_scraped = new_start - 1
+                    max_scraped = start - 1
                     target = min(15.0, random.lognormvariate(math.log(args.cycle_mean) - 0.18, 0.6))
                     elapsed = time.time() - cycle_start
                     if target > elapsed:
                         await asyncio.sleep(target - elapsed)
                     continue
-                if consecutive_dups >= args.dup_stop:
-                    print(f"  [w{wid}] dup-stop reached ({args.dup_stop} consec dups) — done", flush=True)
-                    break
 
             page_n += 1
 
@@ -817,9 +861,10 @@ async def worker(wid: int, ctx, state: State, args):
             if target > elapsed:
                 await asyncio.sleep(target - elapsed)
     finally:
-        async with state.state_lock:
-            print(f"  [w{wid}] DONE  range=[{state.worker_start[wid]}, {state.worker_end[wid]}]"
-                  f"  shift={shift_count_logged}", flush=True)
+        async with state.range_lock:
+            if state.range_status[ridx] == "live":
+                state.range_status[ridx] = "burnt"
+            print(f"  [w{wid}] DONE  last range r{ridx}=[{state.worker_start[ridx]}, {state.worker_end[ridx]}]", flush=True)
         try:
             await page.close()
         except Exception:
@@ -928,6 +973,13 @@ async def main_async():
                         help="fetch page 1, print structure, exit (no CSV writes)")
     args = parser.parse_args()
 
+    # dup-stop must exceed SHIFT_DUP_THRESHOLD or phase-2 stops before the
+    # relocation check can ever fire (relocation requires cdup>=SHIFT_DUP_THRESHOLD).
+    if args.dup_stop <= SHIFT_DUP_THRESHOLD:
+        bumped = SHIFT_DUP_THRESHOLD + 1
+        print(f"  --dup-stop {args.dup_stop} <= SHIFT_DUP_THRESHOLD ({SHIFT_DUP_THRESHOLD}); bumped to {bumped}", flush=True)
+        args.dup_stop = bumped
+
     if args.probe:
         await probe_once(args)
         return
@@ -952,6 +1004,7 @@ async def main_async():
     save_worker_ranges(ranges)   # persist any extension (new workers added)
     state.worker_start = [s for s, _ in ranges]
     state.worker_end   = [e for _, e in ranges]
+    state.range_status = ["free"] * len(ranges)   # workers flip their own to live/burnt
 
     existing_dts = [r.get("datetime", "") for r in state.existing_rows.values() if r.get("datetime")]
     newest = max(existing_dts) if existing_dts else "(none)"
