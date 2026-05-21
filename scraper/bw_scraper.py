@@ -275,12 +275,23 @@ def save_worker_ranges(ranges: list):
     _atomic_replace(tmp, RANGES_CSV)
 
 
+def _save_ranges_locked(state):
+    """Persist the pool, omitting ranges marked 'dropped' (a fully consumed
+    front range whose worker has exited). Routing every in-run save through
+    here keeps a dropped range from being re-added by another worker's save.
+    Caller MUST hold state.range_lock."""
+    save_worker_ranges([
+        (s, e) for i, (s, e) in enumerate(zip(state.worker_start, state.worker_end))
+        if state.range_status[i] != "dropped"
+    ])
+
+
 def _find_infiltrated(state, ridx: int, page_n: int):
     """Return index of a range (other than ridx) whose [start, end] contains
     page_n, else None. Used to detect when a worker has scraped forward into
     territory already covered by another range."""
     for idx in range(len(state.worker_start)):
-        if idx == ridx:
+        if idx == ridx or state.range_status[idx] == "dropped":
             continue
         if state.worker_start[idx] <= page_n <= state.worker_end[idx]:
             return idx
@@ -306,7 +317,7 @@ def _new_chunk_locked(state) -> int:
     state.worker_end.append(start)
     state.range_status.append("live")
     idx = len(state.worker_start) - 1
-    save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
+    _save_ranges_locked(state)
     return idx
 
 
@@ -755,7 +766,7 @@ async def worker(wid: int, ctx, state: State, args):
                 # Persist the range's end whenever it advances.
                 if max_scraped > state.worker_end[ridx]:
                     state.worker_end[ridx] = max_scraped
-                    save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
+                    _save_ranges_locked(state)
                 running_max = max(state.worker_end)
             async with state.state_lock:
                 state.total_new += new_count
@@ -827,21 +838,37 @@ async def worker(wid: int, ctx, state: State, args):
                     async with state.range_lock:
                         inf = _find_infiltrated(state, ridx, page_n)
                         if inf is not None:
-                            state.worker_start[inf] = page_n               # 1. shrink infiltrated start to dup page
-                            state.worker_end[ridx] = max(state.worker_end[ridx], page_n)
-                            state.range_status[ridx] = "burnt"             # 2. burn own range
-                            next_ridx = _claim_free_range_locked(state)    #    free range, else fresh chunk
+                            # A range only ever FINISHES by infiltrating another.
+                            # Drop the finished range so the next run won't RESUME it.
+                            #   middle range: hand its front boundary to the infiltrated
+                            #     range (move inf.start down to ridx.start) so inf's
+                            #     phase-1 resumes there and can still detect shift counts.
+                            #   lowest range: just drop it — the next-smallest range keeps
+                            #     its start with thousands of dup pages before it, so its
+                            #     phase-1 runs but won't detect shifts (accepted drawback).
+                            live = [i for i in range(len(state.worker_start))
+                                    if state.range_status[i] != "dropped"]
+                            is_lowest = ridx == min(live, key=lambda i: state.worker_start[i])
+                            if not is_lowest:
+                                state.worker_start[inf] = state.worker_start[ridx]
+                            state.range_status[ridx] = "dropped"           # remove from CSV
+                            next_ridx = _claim_free_range_locked(state)    # free range, else fresh chunk
                             if next_ridx is None:
                                 next_ridx = _new_chunk_locked(state)
-                            save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
-                            print(f"  [w{wid}] r{ridx} crossed into r{inf} at page {page_n} "
-                                  f"(cdup={consecutive_dups}) — shrank r{inf}.start={page_n}, switching to r{next_ridx}",
+                            _save_ranges_locked(state)
+                            kind = ("lowest — dropped" if is_lowest
+                                    else f"middle — dropped, r{inf}.start→{state.worker_start[inf]}")
+                            print(f"  [w{wid}] r{ridx} infiltrated r{inf} at page {page_n} "
+                                  f"(cdup={consecutive_dups}; {kind}) — switching to r{next_ridx}",
                                   flush=True)
                 if next_ridx is None and consecutive_dups >= args.dup_stop:
+                    # Dup-stop (no infiltration) is NOT a finish — keep the range
+                    # (burnt, still persisted) so the next run resumes it. Only
+                    # infiltration/completion drops a range from the pool.
                     async with state.range_lock:
                         state.range_status[ridx] = "burnt"
-                        next_ridx = _claim_free_range_locked(state)        # own dup-stop: free range, else exit
-                        save_worker_ranges(list(zip(state.worker_start, state.worker_end)))
+                        next_ridx = _claim_free_range_locked(state)        # free range, else exit
+                        _save_ranges_locked(state)
                     if next_ridx is None:
                         print(f"  [w{wid}] r{ridx} dup-stop ({args.dup_stop} dups), no free range — exiting", flush=True)
                         break
