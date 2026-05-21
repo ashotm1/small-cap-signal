@@ -57,7 +57,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input",  default="data/gnw_news.csv")
     parser.add_argument("--output", default="data/gnw_classified.csv")
-    parser.add_argument("--ticker-details", default="data/ticker_universe.csv")
+    parser.add_argument("--ticker-universe", default="data/ticker_universe.csv")
     args = parser.parse_args()
 
     # Append-safe: skip URLs already classified
@@ -67,9 +67,9 @@ if __name__ == "__main__":
             done_urls = {row["url"] for row in csv.DictReader(f)}
         print(f"Resuming — {len(done_urls)} URLs already classified")
 
-    print(f"Building indexes from {args.ticker_details}...")
-    name_index, sorted_keys = build_ticker_index(args.ticker_details)
-    ticker_to_mic = build_ticker_to_mic(args.ticker_details)
+    print(f"Building indexes from {args.ticker_universe}...")
+    name_index, sorted_keys = build_ticker_index(args.ticker_universe)
+    ticker_to_mic = build_ticker_to_mic(args.ticker_universe)
     print(f"  {len(name_index)} names, {len(ticker_to_mic)} tickers loaded")
 
     fieldnames = ["datetime", "source", "url", "title", "ticker", "exchange", "catalyst"]

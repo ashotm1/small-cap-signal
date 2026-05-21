@@ -4,7 +4,7 @@ prn_classifier.py — Classify PRN CSV rows: title, company, ticker, exchange, c
 Pipeline (cheapest first):
   url    → title (strip slug)
   title  → company name guess (text before first PR action verb)
-  name   → (ticker, exchange) via ticker_details.csv lookup
+  name   → (ticker, exchange) via ticker_universe.csv lookup
   ticker → catalyst tags (only if listed on NYSE/NASDAQ; else 'unlisted')
 
 Usage:
@@ -70,8 +70,8 @@ def _normalize(name: str) -> str:
     return " ".join(name.split())
 
 
-def build_ticker_index(ticker_details_path: str) -> tuple[dict[str, tuple[str, str]], list[str]]:
-    """Read ticker_details.csv → (index, sorted_keys).
+def build_ticker_index(ticker_universe_path: str) -> tuple[dict[str, tuple[str, str]], list[str]]:
+    """Read ticker_universe.csv → (index, sorted_keys).
 
     index       — {normalized_name: (ticker, exchange)}
     sorted_keys — sorted list of index keys for O(log N) prefix lookup
@@ -80,7 +80,7 @@ def build_ticker_index(ticker_details_path: str) -> tuple[dict[str, tuple[str, s
     is deterministic; fine-tune later if collisions matter).
     """
     index: dict[str, tuple[str, str]] = {}
-    with open(ticker_details_path, encoding="utf-8") as f:
+    with open(ticker_universe_path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             key = _normalize(row.get("name", ""))
             if key and key not in index:
@@ -137,7 +137,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", default="data/prn_data")
     parser.add_argument("--output", default="data/prn_classified.csv")
-    parser.add_argument("--ticker-details", default="data/ticker_universe.csv")
+    parser.add_argument("--ticker-universe", default="data/ticker_universe.csv")
     args = parser.parse_args()
 
     input_files = sorted(glob.glob(os.path.join(args.input_dir, "prn_*.csv")))
@@ -152,8 +152,8 @@ if __name__ == "__main__":
             done_urls = {row["url"] for row in csv.DictReader(f)}
         print(f"Resuming — {len(done_urls)} URLs already classified")
 
-    print(f"Building ticker index from {args.ticker_details}...")
-    index, sorted_keys = build_ticker_index(args.ticker_details)
+    print(f"Building ticker index from {args.ticker_universe}...")
+    index, sorted_keys = build_ticker_index(args.ticker_universe)
     print(f"  {len(index)} tickers loaded")
 
     write_header = not os.path.exists(args.output)
