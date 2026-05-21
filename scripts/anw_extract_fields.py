@@ -291,10 +291,8 @@ async def worker(queue: asyncio.Queue, client, writer, lock, args, state):
                 state["fh"].flush()
                 print(f"  [{state['label']}] ERR status={status} "
                       f"{state['written']}/{state['total']} url=...{url[-55:]}", flush=True)
-            elif state["written"] % 5 == 0:
-                state["fh"].flush()
-                print(f"  [{state['label']}] written={state['written']}/{state['total']} "
-                      f"last_status=200 url=...{url[-55:]}", flush=True)
+            elif state["written"] % 50 == 0:
+                state["fh"].flush()  # periodic flush for crash-safe resume; no per-row print
         await asyncio.sleep(random.uniform(args.delay_min, args.delay_max))
         queue.task_done()
 
