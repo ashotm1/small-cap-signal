@@ -234,14 +234,13 @@ async def worker(queue, client, get_writer, lock, args, state):
         async with lock:
             fh, writer = get_writer(row)
             writer.writerow(out_row)
+            fh.flush()   # durable per row — flush is cheap vs the network fetch
             state["written"] += 1
             if status != 200:
                 state["errors"] += 1
-                fh.flush()
                 print(f"  ERR status={status} {state['written']}/{state['total']} "
                       f"url=...{url[-55:]}", flush=True)
             elif state["written"] % 200 == 0:
-                fh.flush()
                 rate = state["written"] / max(time.time() - state["t0"], 1)
                 print(f"  written={state['written']}/{state['total']} "
                       f"({rate:.1f}/s, {state['errors']} err)", flush=True)
