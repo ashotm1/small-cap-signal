@@ -285,16 +285,16 @@ async def worker(queue: asyncio.Queue, client, writer, lock, args, state):
         out_row = _clean_row({**row, **fields})
         async with lock:
             writer.writerow(out_row)
+            state["fh"].flush()   # durable per row — flush is cheap vs the network fetch
             state["written"] += 1
             if status != 200:                       # log EVERY failure, not every 5th
                 state["errors"] += 1
-                state["fh"].flush()
                 print(f"  [{state['label']}] ERR status={status} "
                       f"{state['written']}/{state['total']} url=...{url[-55:]}", flush=True)
             elif state["written"] % 100 == 0:
-                state["fh"].flush()
+                rate = state["written"] / max(time.time() - state["t0"], 1)
                 print(f"  [{state['label']}] written={state['written']}/{state['total']} "
-                      f"last_status=200 url=...{url[-55:]}", flush=True)
+                      f"({rate:.2f}/s, {state['errors']} err)", flush=True)
         await asyncio.sleep(random.uniform(args.delay_min, args.delay_max))
         queue.task_done()
 
@@ -345,7 +345,8 @@ async def process_file(client, in_csv, out_csv, args, run):
     if write_header:
         writer.writeheader()
 
-    state = {"written": 0, "errors": 0, "total": len(todo), "fh": fh, "label": label}
+    state = {"written": 0, "errors": 0, "total": len(todo), "fh": fh,
+             "label": label, "t0": time.time()}
     lock = asyncio.Lock()
     queue: asyncio.Queue = asyncio.Queue()
     for row in todo:
