@@ -19,7 +19,7 @@ import os
 import re
 import urllib.parse
 
-from pr_detection import classify_catalyst
+from regex.catalysts import classify_catalyst
 
 _URL_TAIL = re.compile(r"-(\d+)\.html?$", re.IGNORECASE)
 

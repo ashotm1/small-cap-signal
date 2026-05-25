@@ -17,8 +17,9 @@ import time
 import httpx
 import pandas as pd
 
-from edgar import fetch_html
-from pr_detection import analyze_heuristics, classify_heuristic, extract_title, is_earnings, classify_catalyst
+from sec.edgar import fetch_html
+from sec.pr_detect import analyze_heuristics, classify_heuristic, extract_title, is_earnings
+from regex.catalysts import classify_catalyst
 
 BATCH_SIZE = 10
 BATCH_INTERVAL = 1.0

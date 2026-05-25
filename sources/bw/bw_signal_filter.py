@@ -15,7 +15,7 @@ import csv
 import re
 import sys
 
-from pr_detection import classify_catalyst
+from regex.catalysts import classify_catalyst
 
 csv.field_size_limit(10**7)
 

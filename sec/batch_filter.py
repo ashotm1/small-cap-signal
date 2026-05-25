@@ -11,7 +11,7 @@ import os
 import time
 import httpx
 import pandas as pd
-from edgar import fetch_index, SEC_ARCHIVES
+from sec.edgar import fetch_index, SEC_ARCHIVES
 
 BATCH_SIZE = 10
 BATCH_INTERVAL = 1.0

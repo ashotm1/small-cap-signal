@@ -1,16 +1,17 @@
 """
-pipeline.py — Run the full SEC EDGAR pipeline from index download to PR classification.
+pipeline.py — Run the full SEC EDGAR pipeline (secondary source) from index
+download to PR classification. Steps run as `python -m <module>` from repo root.
 
 Steps (in order):
-  1. download_idx.py     — download daily index files from EDGAR
-  2. parse_idx.py        — parse index files → data/8k.csv
-  3. batch_filter.py     — fetch filing index pages → data/8k_ex99.csv
-  4. classify_exhibits.py      — classify EX-99 exhibits → data/ex_99_classified.csv
-  5. classify_catalyst_llm.py  — (optional --llm) LLM catalyst classify for 'other' rows
-  6. fetch_market_data.py — (optional --prices) fetch Polygon market data for signal rows
+  1. sec.download_idx          — download daily index files from EDGAR
+  2. sec.parse_idx            — parse index files → data/8k.csv
+  3. sec.batch_filter         — fetch filing index pages → data/8k_ex99.csv
+  4. sec.classify_exhibits    — classify EX-99 exhibits → data/ex_99_classified.csv
+  5. sec.classify_catalyst_llm — (optional --llm) LLM catalyst classify for 'other' rows
+  6. market.fetch_market_data — (optional --market) fetch Polygon market data for signal rows
 
 Each step is append-safe and skips already-processed rows.
-Feature extraction (extract_features.py) is run separately.
+Per-category feature extraction (features.runner) is run separately.
 
 Usage:
   python pipeline.py --date-from 2022-01-01 --date-to 2025-12-31
@@ -47,25 +48,25 @@ def main():
     args = parser.parse_args()
 
     # Step 1 — download index files
-    dl_args = ["scripts/download_idx.py"]
+    dl_args = ["-m", "sec.download_idx"]
     if args.days:
         dl_args += ["--days", str(args.days)]
     else:
         dl_args += ["--date-from", args.date_from]
         if args.date_to:
             dl_args += ["--date-to", args.date_to]
-    run(dl_args, "Step 1: download_idx.py")
+    run(dl_args, "Step 1: sec.download_idx")
 
     # Steps 2-4 — no args needed, each reads from previous step's output
-    run(["scripts/parse_idx.py"],        "Step 2: parse_idx.py")
-    run(["scripts/batch_filter.py"],     "Step 3: batch_filter.py")
-    run(["scripts/classify_exhibits.py"], "Step 4: classify_exhibits.py")
+    run(["-m", "sec.parse_idx"],        "Step 2: sec.parse_idx")
+    run(["-m", "sec.batch_filter"],     "Step 3: sec.batch_filter")
+    run(["-m", "sec.classify_exhibits"], "Step 4: sec.classify_exhibits")
 
     if args.llm:
-        run(["scripts/classify_catalyst_llm.py", "--run"], "Step 5: classify_catalyst_llm.py")
+        run(["-m", "sec.classify_catalyst_llm", "--run"], "Step 5: sec.classify_catalyst_llm")
 
     if args.market:
-        run(["scripts/fetch_market_data.py"], "Step 6: fetch_market_data.py")
+        run(["-m", "market.fetch_market_data"], "Step 6: market.fetch_market_data")
 
     print("\nPipeline complete.")
 

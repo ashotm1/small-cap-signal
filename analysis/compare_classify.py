@@ -26,8 +26,6 @@ import sys
 import pandas as pd
 from anthropic import Anthropic
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
 # ── Config ─────────────────────────────────────────────────────────────────────
 CLASSIFIED_CSV  = "data/ex_99_classified.csv"
 SAMPLE_CSV      = "data/compare_sample.csv"

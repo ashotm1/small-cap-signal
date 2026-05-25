@@ -57,8 +57,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 # Reuse the scraper's Chrome/CDP helpers + ticker regex (keeps them in sync).
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scraper"))
-import bw_scraper as bws  # noqa: E402
+import ingest.bw_scraper as bws
 
 # Article bodies can exceed the default 128 KB per-field cap. Raise it as high
 # as the platform allows (sys.maxsize overflows the csv module's C long on

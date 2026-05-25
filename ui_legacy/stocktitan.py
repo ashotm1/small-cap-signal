@@ -1,8 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 
-from ai_sentiment.openai_client import analyze_titles as openai_analyze
-from ai_sentiment.anthropic_client import analyze_titles as anthropic_analyze
+from ui_legacy.ai_sentiment.openai_client import analyze_titles as openai_analyze
+from ui_legacy.ai_sentiment.anthropic_client import analyze_titles as anthropic_analyze
 
 FINBERT_URL = "http://127.0.0.1:5000/analyze"
 

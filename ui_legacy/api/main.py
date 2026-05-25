@@ -1,17 +1,21 @@
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from scraper.stocktitan import scrape  
+from ui_legacy.stocktitan import scrape
 import time
+
+# Resolve static/template relative to ui_legacy/, so the app runs from any cwd.
+_UI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 app = FastAPI()
 
 # Serve HTML + static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=os.path.join(_UI, "static")), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    with open("template/index.html", "r", encoding="utf-8") as f:
+    with open(os.path.join(_UI, "template", "index.html"), "r", encoding="utf-8") as f:
         return f.read()
 
 @app.post("/run")

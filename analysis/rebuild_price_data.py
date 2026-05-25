@@ -5,11 +5,7 @@ Reads backup_data.csv (previous price_data snapshot) + price_bars.csv,
 recomputes price change columns using current compute_changes logic, writes price_data.csv.
 """
 import pandas as pd
-import sys, os
-_root = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, _root)
-sys.path.insert(0, os.path.join(_root, "scripts"))
-from scripts.fetch_market_data import compute_changes, _OFFSETS_MS
+from market.fetch_market_data import compute_changes, _OFFSETS_MS
 
 BACKUP_CSV = "data/backup_data.csv"
 BARS_CSV   = "data/prices/price_bars.csv"

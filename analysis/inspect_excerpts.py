@@ -3,14 +3,13 @@ inspect_excerpts.py — Show exactly what text is fed to the LLM for each row in
 """
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 import asyncio
 import re
 import httpx
 import pandas as pd
 from bs4 import BeautifulSoup
-from edgar import fetch_html, HEADERS
+from sec.edgar import fetch_html, HEADERS
 
 INPUT_CSV = "data/combined_disagreements.csv"
 BATCH_SIZE = 10

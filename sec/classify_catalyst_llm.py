@@ -22,7 +22,7 @@ import httpx
 import pandas as pd
 from anthropic import Anthropic
 
-from edgar import fetch_html
+from sec.edgar import fetch_html
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 INPUT_CSV        = "data/ex_99_classified.csv"

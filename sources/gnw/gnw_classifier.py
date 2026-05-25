@@ -14,8 +14,8 @@ import argparse
 import csv
 import os
 
-from prn_classifier import build_ticker_index, lookup_ticker, _LISTED_EXCHANGES
-from pr_detection import classify_catalyst
+from sources.prnw.prn_classifier import build_ticker_index, lookup_ticker, _LISTED_EXCHANGES
+from regex.catalysts import classify_catalyst
 
 
 def build_ticker_to_mic(path: str) -> dict[str, str]:

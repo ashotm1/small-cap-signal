@@ -5,15 +5,14 @@ and reports agreement stats.
 """
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 import argparse
 import asyncio
 import time
 import httpx
 import pandas as pd
-from edgar import fetch_html
-from pr_detection import classify_llm
+from sec.edgar import fetch_html
+from sec.pr_detect import classify_llm
 
 INPUT_CSV = "data/ex_99_classified.csv"
 BATCH_SIZE = 10

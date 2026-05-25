@@ -42,8 +42,8 @@ import os
 import re
 import urllib.parse
 
-from bw_signal_filter import is_spam
-from pr_detection import classify_catalyst, is_signal
+from sources.bw.bw_signal_filter import is_spam
+from regex.catalysts import classify_catalyst, is_signal
 
 csv.field_size_limit(10**7)
 

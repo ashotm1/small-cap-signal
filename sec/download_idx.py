@@ -11,7 +11,7 @@ import time
 import httpx
 from datetime import date, timedelta
 
-from edgar import HEADERS
+from sec.edgar import HEADERS
 IDX_DIR = "idx"
 BATCH_SIZE = 10
 BATCH_INTERVAL = 1.0  # seconds between batches → 10 req/s

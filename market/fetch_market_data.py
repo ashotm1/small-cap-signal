@@ -38,7 +38,7 @@ _ET = ZoneInfo("America/New_York")
 
 import httpx
 import pandas as pd
-from edgar import fetch_ticker, load_cik_cache, save_cik_cache
+from sec.edgar import fetch_ticker, load_cik_cache, save_cik_cache
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
