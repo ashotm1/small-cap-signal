@@ -73,6 +73,7 @@ class FeatureSchema:
     intro: str              # one-line description of the event type, for the prompt
     fields: list            # list[FieldSpec]
     examples: list = field(default_factory=list)  # optional (body, dict) few-shot pairs
+    deriver: Optional[object] = None  # optional callable(df, schema) -> DataFrame of f_ cols
 
     # --- column names -------------------------------------------------------
     def column_names(self) -> list:
