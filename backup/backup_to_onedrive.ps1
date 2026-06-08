@@ -14,8 +14,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$src = "C:\sentiment-analyzer\data"
-$dst = "C:\Users\Ashot\OneDrive\Documents\ai-market-signal-data"
+$src = "C:\news-signal\data"
+$dst = "C:\Users\Ashot\OneDrive\Documents\news-signal-data"
 
 if (-not (Test-Path $src)) { throw "source missing: $src" }
 if (-not (Test-Path $dst)) { New-Item -ItemType Directory -Path $dst | Out-Null }

@@ -1,4 +1,4 @@
-# AI Market Signal
+# News Signal
 
 Event-driven trading signal pipeline for small-cap stocks. Scrapes catalyst press releases from the major newswires, extracts structured features from each release via LLM, pairs them with intraday price reactions, and feeds an ML model that predicts continuation/reversal at decision time.
 
