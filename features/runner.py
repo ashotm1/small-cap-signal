@@ -1,40 +1,34 @@
 """
-extract_category_features.py — per-category structured feature extraction from
-article bodies, via the Anthropic Batch API.
+features/runner.py — per-category structured feature extraction from article
+bodies, via the Anthropic Batch API.
 
 This is the runner. It is generic over the catalyst category: it loads the
-matching FeatureSchema from feature_schemas/, filters the input rows to that
+matching FeatureSchema from features/schemas/, filters the input rows to that
 category, and asks the model to extract that category's typed fields from each
 article body into one wide, namespaced output row. To work on a new category
 (e.g. crypto_treasury) you add a schema module — this file does not change.
 
-(Distinct from the legacy scripts/extract_features.py, which runs a single
-generic schema against the older ex_99_classified.csv / live-SEC stage. This one
-consumes the already-extracted `article_body` from the *_signal_articles.csv
-pipeline and is per-category.)
-
-Design (see the API discussion that produced it):
+Design:
   * One body per request — NOT multiple bodies per prompt. Full attention per
     document is what gives good recall on a ~25-field schema with strict null
     discipline.
-  * The shared prefix (system prompt + field definitions) is cached with a 1h
-    TTL so a long-running batch gets cache reads on it. Because batch requests
-    run concurrently, the first ones can't read a cache the others are still
-    writing, so we PRE-WARM the cache with one max_tokens=0 request (rejected
-    inside a batch, so it's sent separately) right before submitting.
-  * Output is constrained with output_config.format (JSON schema): every field
-    present, each nullable. "Not stated" -> null; the prompt forbids guessing.
-  * effort / thinking are intentionally NOT set, so the same script runs on
-    Sonnet 4.6 and Haiku 4.5 unchanged (effort 400s on Haiku) — that's the A/B
-    knob for the fill-rate pass.
+  * The shared prefix (system prompt + field definitions) is cached with a 5-min
+    TTL. Because batch requests run concurrently, the first ones can't read a
+    cache the others are still writing, so we PRE-WARM the cache with one
+    max_tokens=0 request right before submitting.
+  * Plain JSON-mode (not strict structured output): strict structured output caps
+    nullable unions at 16 and our schemas exceed that. JSON is a prompt rule;
+    _parse_features is tolerant. "Not stated" -> null; the prompt forbids guessing.
+  * effort / thinking are intentionally NOT set, so the same runner works on
+    Sonnet 4.6 and Haiku 4.5 unchanged — that's the A/B knob for the fill-rate pass.
 
 Usage:
-  python scripts/extract_category_features.py --category private_placement --run
-  python scripts/extract_category_features.py --category private_placement --submit-batch
-  python scripts/extract_category_features.py --category private_placement --collect-batch
-  python scripts/extract_category_features.py --category private_placement --status
+  python -m features.runner --category private_placement --run
+  python -m features.runner --category private_placement --submit-batch
+  python -m features.runner --category private_placement --collect-batch
+  python -m features.runner --category private_placement --status
   # A/B a cheaper model on a sample:
-  python scripts/extract_category_features.py --category private_placement --model claude-haiku-4-5 --sample 150 --run
+  python -m features.runner --category private_placement --model claude-haiku-4-5 --sample 150 --run
 """
 import argparse
 import json
@@ -132,8 +126,10 @@ def _done_urls(output_csv) -> set:
     if not os.path.exists(output_csv):
         return set()
     done = set()
-    for chunk in pd.read_csv(output_csv, dtype=str, usecols=["url"], chunksize=50000):
-        done.update(chunk["url"].dropna())
+    for chunk in pd.read_csv(output_csv, dtype=str,
+                             usecols=["url", "_extract_status"], chunksize=50000):
+        succeeded = chunk["_extract_status"] == "succeeded"
+        done.update(chunk.loc[succeeded, "url"].dropna())
     return done
 
 
